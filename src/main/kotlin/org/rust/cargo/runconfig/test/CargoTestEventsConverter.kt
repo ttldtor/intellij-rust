@@ -7,9 +7,6 @@ package org.rust.cargo.runconfig.test
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
-import com.google.gson.JsonSyntaxException
-import com.google.gson.stream.JsonReader
 import com.intellij.execution.testframework.TestConsoleProperties
 import com.intellij.execution.testframework.sm.ServiceMessageBuilder
 import com.intellij.execution.testframework.sm.runner.OutputToGeneralTestEventsConverter
@@ -24,9 +21,9 @@ import org.rust.cargo.project.model.impl.allPackages
 import org.rust.cargo.project.workspace.CargoWorkspace
 import org.rust.cargo.project.workspace.PackageOrigin
 import org.rust.cargo.runconfig.test.CargoTestEventsConverter.State.*
+import org.rust.stdext.JsonUtil.tryParseJsonObject
 import org.rust.stdext.removeLast
 import java.io.File
-import java.io.StringReader
 
 private typealias NodeId = String
 
@@ -50,13 +47,8 @@ class CargoTestEventsConverter(
     override fun processServiceMessages(text: String, outputType: Key<*>, visitor: ServiceMessageVisitor): Boolean {
         if (handleStartMessage(text)) return true
 
-        val jsonObject = try {
-            val escapedText = text.replace(DOCTEST_PATH_RE) { it.value.replace("\\", "\\\\") }
-            val reader = JsonReader(StringReader(escapedText)).apply { isLenient = true }
-            PARSER.parse(reader).takeIf { it.isJsonObject }?.asJsonObject
-        } catch (e: JsonSyntaxException) {
-            null
-        } ?: return true
+        val escapedText = text.replace(DOCTEST_PATH_RE) { it.value.replace("\\", "\\\\") }
+        val jsonObject = tryParseJsonObject(escapedText) ?: return true
 
         if (handleTestMessage(jsonObject, outputType, visitor)) return true
         if (handleSuiteMessage(jsonObject, outputType, visitor)) return true
@@ -255,13 +247,11 @@ class CargoTestEventsConverter(
     }
 
     companion object {
-        private val PARSER: JsonParser = JsonParser()
-
-        private const val TARGET_PATH_PART: String = "/target/"
-
         private const val ROOT_SUITE: String = "0"
         private const val NAME_SEPARATOR: String = "::"
         private const val DOCTESTS_SUFFIX = "doctests"
+
+        private const val TARGET_PATH_PART: String = "/target/"
 
         private val DOCTEST_PATH_RE: Regex = """"[0-9 a-z_A-Z\-\\.]+ - """.toRegex()
 

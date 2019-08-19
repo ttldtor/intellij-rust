@@ -5,8 +5,6 @@
 
 package org.rust.cargo.runconfig.legacy
 
-import com.google.gson.JsonParser
-import com.google.gson.JsonSyntaxException
 import com.intellij.execution.DefaultExecutionResult
 import com.intellij.execution.RunContentExecutor
 import com.intellij.execution.configurations.GeneralCommandLine
@@ -40,6 +38,7 @@ import org.rust.cargo.toolchain.impl.CargoMetadata
 import org.rust.cargo.toolchain.prependArgument
 import org.rust.cargo.util.CargoArgsParser.Companion.parseArgs
 import org.rust.openapiext.saveAllDocuments
+import org.rust.stdext.JsonUtil.tryParseJsonObject
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -177,18 +176,9 @@ abstract class RsAsyncRunner(
                             }
 
                             result = output.stdoutLines
-                                .mapNotNull {
-                                    try {
-                                        val jsonElement = PARSER.parse(it)
-                                        val jsonObject = if (jsonElement.isJsonObject) {
-                                            jsonElement.asJsonObject
-                                        } else {
-                                            return@mapNotNull null
-                                        }
-                                        CargoMetadata.Artifact.fromJson(jsonObject)
-                                    } catch (e: JsonSyntaxException) {
-                                        null
-                                    }
+                                .mapNotNull { line ->
+                                    val jsonObject = tryParseJsonObject(line) ?: return@mapNotNull null
+                                    CargoMetadata.Artifact.fromJson(jsonObject)
                                 }
                                 .filter { (target, profile) ->
                                     val isSuitableTarget = when (target.cleanKind) {
@@ -246,8 +236,6 @@ abstract class RsAsyncRunner(
     }
 
     companion object {
-        private val PARSER: JsonParser = JsonParser()
-
         class Binary(val path: Path)
 
         private sealed class BuildResult {

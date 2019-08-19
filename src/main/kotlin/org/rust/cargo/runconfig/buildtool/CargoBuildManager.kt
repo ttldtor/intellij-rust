@@ -61,29 +61,30 @@ object CargoBuildManager {
     val CANCELED_BUILD_RESULT: Future<CargoBuildResult> =
         FutureResult(CargoBuildResult(succeeded = false, canceled = true, started = 0))
 
-    private val MIN_RUSTC_VERSION: SemVer = SemVer("1.32.0", 1, 32, 0)
+    private val MIN_SUPPORTED_VERSION: SemVer = SemVer.parseFromText("1.32.0")!!
+    private val MIN_JSON_ANSI_VERSION: SemVer = SemVer.parseFromText("1.38.0")!!
 
     val Project.isBuildToolWindowEnabled: Boolean
         get() {
             if (!isFeatureEnabled(RsExperiments.BUILD_TOOL_WINDOW)) return false
-            val rustcVersion = cargoProjects
-                .allProjects
-                .mapNotNull { it.rustcInfo?.version?.semver }
-                .min()
-                ?: return false
-            return rustcVersion >= MIN_RUSTC_VERSION
+            val rustcVersion = minRustcVersion ?: return false
+            return rustcVersion >= MIN_SUPPORTED_VERSION
         }
+
+    private val Project.minRustcVersion: SemVer?
+        get() = cargoProjects.allProjects.mapNotNull { it.rustcInfo?.version?.semver }.min()
 
     fun build(buildConfiguration: CargoBuildConfiguration): Future<CargoBuildResult> {
         val configuration = buildConfiguration.configuration
         val environment = buildConfiguration.environment
+        val project = environment.project
 
         val state = CargoRunState(
             environment,
             configuration,
             configuration.clean().ok ?: return CANCELED_BUILD_RESULT
         ).apply {
-            addCommandLinePatch(cargoBuildPatch)
+            addCommandLinePatch(getCargoBuildPatch(project))
             for (patch in environment.cargoPatches) {
                 addCommandLinePatch(patch)
             }
@@ -92,7 +93,7 @@ object CargoBuildManager {
         val cargoProject = state.cargoProject ?: return CANCELED_BUILD_RESULT
 
         // Make sure build tool window is initialized:
-        ServiceManager.getService(cargoProject.project, BuildContentManager::class.java)
+        ServiceManager.getService(project, BuildContentManager::class.java)
 
         if (isUnitTestMode) {
             lastBuildCommandLine = state.commandLine
@@ -117,7 +118,11 @@ object CargoBuildManager {
                 buildToolWindow?.show(null)
             }
 
-            processHandler = state.startProcess(emulateTerminal = true)
+            processHandler = state.startProcess(
+                useColoredProcessHandler = false,
+                emulateTerminal = true,
+                redirectErrorStream = false
+            )
             processHandler.addProcessListener(CargoBuildAdapter(this, buildProgressListener))
             processHandler.startNotify()
         }
@@ -276,16 +281,21 @@ object CargoBuildManager {
         return notificationContent
     }
 
-    private val cargoBuildPatch: CargoPatch = { commandLine ->
+    private fun getCargoBuildPatch(project: Project): CargoPatch = { commandLine ->
         val additionalArguments = commandLine.additionalArguments.toMutableList()
+
         additionalArguments.remove("-q")
         additionalArguments.remove("--quiet")
-        addFormatJsonOption(additionalArguments, "--message-format")
+
+        val minRustcVersion = project.minRustcVersion
+        val format = if (minRustcVersion != null && minRustcVersion >= MIN_JSON_ANSI_VERSION) "json-diagnostic-rendered-ansi" else "json"
+        addFormatJsonOption(additionalArguments, "--message-format", format)
+
         val environmentVariables = EnvironmentVariablesData.create(
-            EnvironmentUtil.getEnvironmentMap() +
-                commandLine.environmentVariables.envs - "CI" + ("TERM" to "ansi"),
+            EnvironmentUtil.getEnvironmentMap() + commandLine.environmentVariables.envs - "CI" + ("TERM" to "ansi"),
             false
         )
+
         commandLine.copy(additionalArguments = additionalArguments, environmentVariables = environmentVariables)
     }
 

@@ -6,10 +6,13 @@
 package org.rust.cargo.runconfig
 
 import com.intellij.execution.configurations.CommandLineState
+import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.configurations.PtyCommandLine
+import com.intellij.execution.process.KillableProcessHandler
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
+import com.pty4j.PtyProcess
 import org.rust.cargo.project.model.CargoProject
 import org.rust.cargo.runconfig.buildtool.CargoPatch
 import org.rust.cargo.runconfig.command.CargoCommandConfiguration
@@ -51,17 +54,47 @@ abstract class CargoRunStateBase(
         return commandLine
     }
 
-    override fun startProcess(): ProcessHandler = startProcess(emulateTerminal = false)
+    override fun startProcess(): ProcessHandler =
+        startProcess(
+            useColoredProcessHandler = true,
+            emulateTerminal = false,
+            redirectErrorStream = true
+        )
 
-    fun startProcess(emulateTerminal: Boolean): ProcessHandler {
-        var commandLine = cargo().toColoredCommandLine(environment.project, prepareCommandLine())
-        if (emulateTerminal) {
-            commandLine = PtyCommandLine(commandLine)
-                .withInitialColumns(PtyCommandLine.MAX_COLUMNS)
-                .withConsoleMode(false)
+    fun startProcess(
+        useColoredProcessHandler: Boolean,
+        emulateTerminal: Boolean,
+        redirectErrorStream: Boolean
+    ): ProcessHandler {
+        val commandLine = cargo()
+            .toColoredCommandLine(environment.project, prepareCommandLine())
+            .withRedirectErrorStream(redirectErrorStream)
+            .withTerminalEmulator(emulateTerminal)
+
+        val handler = if (useColoredProcessHandler) {
+            RsKillableColoredProcessHandler(commandLine)
+        } else {
+            KillableProcessHandler(commandLine)
         }
-        val handler = RsKillableColoredProcessHandler(commandLine)
+
         ProcessTerminatedListener.attach(handler) // shows exit code upon termination
         return handler
+    }
+
+    companion object {
+        private fun GeneralCommandLine.withTerminalEmulator(emulateTerminal: Boolean): GeneralCommandLine {
+            if (!emulateTerminal) return this
+            val ptyCommandLine = object : PtyCommandLine(this) {
+                override fun startProcess(commands: MutableList<String>): Process {
+                    val process = super.startProcess(commands)
+                    if (process is PtyProcess) {
+                        // Sets winSize for errPty
+                        process.winSize = process.winSize
+                    }
+                    return process
+                }
+            }
+            return ptyCommandLine.withInitialColumns(PtyCommandLine.MAX_COLUMNS)
+        }
     }
 }

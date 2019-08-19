@@ -54,7 +54,11 @@ class CargoTestCommandRunner : AsyncProgramRunner<RunnerSettings>() {
                 val buildCmd = if (cmdHasNoRun) state.commandLine else state.commandLine.prependArgument("--no-run")
                 val buildConfig = CargoCommandConfiguration.CleanConfiguration.Ok(buildCmd, state.config.toolchain)
                 val buildState = CargoRunState(state.environment, state.runConfiguration, buildConfig)
-                buildState.startProcess(emulateTerminal = false)
+                buildState.startProcess(
+                    useColoredProcessHandler = true,
+                    emulateTerminal = false,
+                    redirectErrorStream = true
+                )
             }
             val exitCode = AsyncPromise<Int?>()
 
