@@ -753,6 +753,11 @@
                              groupId="language"
                              id="language.rust"/>
 
+        <projectConfigurable instance="org.rust.cargo.project.configurable.RsActiveSdkModuleConfigurable"
+                             displayName="Toolchain"
+                             parentId="language.rust"
+                             id="language.rust.toolchain"/>
+
         <projectConfigurable instance="org.rust.cargo.project.configurable.CargoConfigurable"
                              displayName="Cargo"
                              parentId="language.rust"
