@@ -55,20 +55,11 @@ abstract class CargoRunStateBase(
     }
 
     override fun startProcess(): ProcessHandler =
-        startProcess(
-            useColoredProcessHandler = true,
-            emulateTerminal = false,
-            redirectErrorStream = true
-        )
+        startProcess(useColoredProcessHandler = true, emulateTerminal = false)
 
-    fun startProcess(
-        useColoredProcessHandler: Boolean,
-        emulateTerminal: Boolean,
-        redirectErrorStream: Boolean
-    ): ProcessHandler {
+    fun startProcess(useColoredProcessHandler: Boolean, emulateTerminal: Boolean): ProcessHandler {
         val commandLine = cargo()
             .toColoredCommandLine(environment.project, prepareCommandLine())
-            .withRedirectErrorStream(redirectErrorStream)
             .withTerminalEmulator(emulateTerminal)
 
         val handler = if (useColoredProcessHandler) {
@@ -82,19 +73,13 @@ abstract class CargoRunStateBase(
     }
 
     companion object {
-        private fun GeneralCommandLine.withTerminalEmulator(emulateTerminal: Boolean): GeneralCommandLine {
-            if (!emulateTerminal) return this
-            val ptyCommandLine = object : PtyCommandLine(this) {
-                override fun startProcess(commands: MutableList<String>): Process {
-                    val process = super.startProcess(commands)
-                    if (process is PtyProcess) {
-                        // Sets winSize for errPty
-                        process.winSize = process.winSize
-                    }
-                    return process
-                }
+        private fun GeneralCommandLine.withTerminalEmulator(emulateTerminal: Boolean): GeneralCommandLine =
+            if (emulateTerminal) {
+                PtyCommandLine(this)
+                    .withInitialColumns(PtyCommandLine.MAX_COLUMNS)
+                    .withConsoleMode(true)
+            } else {
+                this
             }
-            return ptyCommandLine.withInitialColumns(PtyCommandLine.MAX_COLUMNS)
-        }
     }
 }

@@ -118,11 +118,7 @@ object CargoBuildManager {
                 buildToolWindow?.show(null)
             }
 
-            processHandler = state.startProcess(
-                useColoredProcessHandler = false,
-                emulateTerminal = true,
-                redirectErrorStream = true
-            )
+            processHandler = state.startProcess(useColoredProcessHandler = false, emulateTerminal = true)
             processHandler.addProcessListener(CargoBuildAdapter(this, buildProgressListener))
             processHandler.startNotify()
         }

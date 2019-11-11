@@ -30,12 +30,16 @@ import java.util.function.Consumer
 class RustcBuildEventsConverter(private val context: CargoBuildContext) : BuildOutputParser {
     private val messageEvents: MutableSet<MessageEvent> = hashSetOf()
 
+    private val messageBuffer: StringBuilder = StringBuilder()
+
     override fun parse(
         line: String,
         reader: BuildOutputInstantReader,
         messageConsumer: Consumer<in BuildEvent>
     ): Boolean {
-        val jsonObject = tryParseJsonObject(line.dropWhile { it != '{' }) ?: return false
+        if (!messageBuffer.contains("{\"reason\"") && !line.contains("{\"reason\"")) return false
+        messageBuffer.append(line)
+        val jsonObject = tryParseJsonObject(messageBuffer.dropWhile { it != '{' }.toString()) ?: return true
         tryHandleRustcMessage(jsonObject, messageConsumer) || tryHandleRustcArtifact(jsonObject)
         return true
     }
