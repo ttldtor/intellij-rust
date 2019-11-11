@@ -8,6 +8,7 @@ package org.rust.cargo.runconfig.buildtool
 import com.intellij.build.BuildProgressListener
 import com.intellij.build.DefaultBuildDescriptor
 import com.intellij.build.events.impl.*
+import com.intellij.build.output.BuildOutputInstantReaderImpl
 import com.intellij.execution.ExecutorRegistry
 import com.intellij.execution.actions.StopProcessAction
 import com.intellij.execution.impl.ExecutionManagerImpl
@@ -23,8 +24,11 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.openapi.util.text.StringUtil.escapeToRegexp
 import com.intellij.openapi.vfs.VfsUtil
 import org.rust.cargo.CargoConstants
+import org.rust.cargo.runconfig.RsAnsiEscapeDecoder.Companion.ANSI_SGR_RE
+import org.rust.cargo.runconfig.RsAnsiEscapeDecoder.Companion.CSI
 import org.rust.cargo.runconfig.createFilters
 
 @Suppress("UnstableApiUsage")
@@ -32,13 +36,14 @@ class CargoBuildAdapter(
     private val context: CargoBuildContext,
     private val buildProgressListener: BuildProgressListener
 ) : ProcessAdapter() {
-    private val buildOutputReader = RsBuildOutputReader(
+    private val buildOutputReader = BuildOutputInstantReaderImpl(
         context.buildId,
         context.buildId,
         buildProgressListener,
-        RustcBuildEventsConverter(context),
-        CargoBuildEventsConverter(context)
+        listOf(RustcBuildEventsConverter(context), CargoBuildEventsConverter(context))
     )
+
+    private val messageBuffer: StringBuilder = StringBuilder()
 
     init {
         context.environment.notifyProcessStarted(context.processHandler)
@@ -88,10 +93,23 @@ class CargoBuildAdapter(
     }
 
     override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
-        buildOutputReader.append(event.text, outputType)
+        messageBuffer.append(event.text)
+        if (!event.text.endsWith("\n")) return
+
+        // If the line contains a JSON message (contains `{"reason"` substring), then it should end with `}\n`,
+        // otherwise the line contains only part of the message.
+        if (messageBuffer.contains("{\"reason\"") && !messageBuffer.endsWith("}\n")) return
+
+        buildOutputReader.append(messageBuffer
+            .replace(ERASE_LINES_RE, "\n")
+            .replace(BUILD_PROGRESS_RE) { it.value.trimEnd(' ', '\r', '\n') + "\n" })
+        messageBuffer.clear()
     }
 
     companion object {
+        private val ERASE_LINES_RE: Regex = """${escapeToRegexp(CSI)}\d?K""".toRegex()
+        private val BUILD_PROGRESS_RE: Regex = """($ANSI_SGR_RE)* *Building($ANSI_SGR_RE)* \[ *=*>? *] \d+/\d+: [\w\-(.)]+(, [\w\-(.)]+)*( *[\r\n])*""".toRegex()
+
         private fun createStopAction(processHandler: ProcessHandler): StopProcessAction =
             StopProcessAction("Stop", "Stop", processHandler)
 

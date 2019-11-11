@@ -27,6 +27,98 @@ import org.rust.stdext.JsonUtil.tryParseJsonObject
 import java.nio.file.Paths
 import java.util.function.Consumer
 
+class RustcBuildEventsConverter(private val context: CargoBuildContext) : BuildOutputParser {
+    private val messageEvents: MutableSet<MessageEvent> = hashSetOf()
+
+    override fun parse(
+        line: String,
+        reader: BuildOutputInstantReader,
+        messageConsumer: Consumer<in BuildEvent>
+    ): Boolean {
+        val jsonObject = tryParseJsonObject(line.dropWhile { it != '{' }) ?: return false
+        tryHandleRustcMessage(jsonObject, messageConsumer) || tryHandleRustcArtifact(jsonObject)
+        return true
+    }
+
+    private fun tryHandleRustcMessage(jsonObject: JsonObject, messageConsumer: Consumer<in BuildEvent>): Boolean {
+        val topMessage = CargoTopMessage.fromJson(jsonObject) ?: return false
+        val rustcMessage = topMessage.message
+
+        val detailedMessage = rustcMessage.rendered
+        if (detailedMessage != null) {
+            messageConsumer.acceptText(context.buildId, detailedMessage.withNewLine())
+        }
+
+        val message = rustcMessage.message.trim().capitalize().trimEnd('.')
+        if (message.startsWith("Aborting due")) return true
+
+        val parentEventId = topMessage.package_id.substringBefore("(").trimEnd()
+
+        val kind = getMessageKind(rustcMessage.level)
+        if (kind == MessageEvent.Kind.SIMPLE) return true
+
+        val filePosition = getFilePosition(rustcMessage)
+
+        val messageEvent = createMessageEvent(parentEventId, kind, message, detailedMessage, filePosition)
+        if (messageEvents.add(messageEvent)) {
+            messageConsumer.accept(messageEvent)
+            if (kind == MessageEvent.Kind.ERROR) {
+                context.errors += 1
+            } else {
+                context.warnings += 1
+            }
+        }
+
+        return true
+    }
+
+    private fun tryHandleRustcArtifact(jsonObject: JsonObject): Boolean {
+        val rustcArtifact = CargoMetadata.Artifact.fromJson(jsonObject) ?: return false
+
+        val isSuitableTarget = when (rustcArtifact.target.cleanKind) {
+            CargoMetadata.TargetKind.BIN -> true
+            CargoMetadata.TargetKind.EXAMPLE -> {
+                // TODO: support cases when crate types list contains not only binary
+                rustcArtifact.target.cleanCrateTypes.singleOrNull() == CargoMetadata.CrateType.BIN
+            }
+            CargoMetadata.TargetKind.TEST -> true
+            CargoMetadata.TargetKind.LIB -> rustcArtifact.profile.test
+            else -> false
+        }
+        if (!isSuitableTarget || context.isTestBuild && !rustcArtifact.profile.test) return true
+
+        val executable = rustcArtifact.executable
+        if (executable != null) {
+            context.binaries.add(Paths.get(executable))
+        } else {
+            // BACKCOMPAT: Cargo 0.34.0
+            rustcArtifact.filenames
+                .filter { it.endsWith(".dSYM") }
+                .mapTo(context.binaries) { Paths.get(it) }
+        }
+
+        return true
+    }
+
+    private fun getFilePosition(message: RustcMessage): FilePosition? {
+        val span = message.mainSpan ?: return null
+        val filePath = run {
+            var filePath = Paths.get(span.file_name)
+            if (!filePath.isAbsolute) {
+                filePath = context.workingDirectory.resolve(filePath)
+            }
+            filePath
+        }
+        return FilePosition(
+            filePath.toFile(),
+            span.line_start - 1,
+            span.column_start - 1,
+            span.line_end - 1,
+            span.column_end - 1
+        )
+    }
+}
+
 class CargoBuildEventsConverter(private val context: CargoBuildContext) : BuildOutputParser {
     private val decoder: AnsiEscapeDecoder = AnsiEscapeDecoder()
 
@@ -59,9 +151,8 @@ class CargoBuildEventsConverter(private val context: CargoBuildContext) : BuildO
                 handleCompilingMessage(message, false, messageConsumer)
             message.startsWith("Fresh") ->
                 handleCompilingMessage(message, true, messageConsumer)
-            message.startsWith("Fetch") ||
-                message.startsWith("Building") ||
-                message.startsWith("Downloading") -> {
+            message.startsWith("Building") || message.startsWith("Downloading") ||
+                message.startsWith("Checkout") || message.startsWith("Fetch") -> {
                 handleProgressMessage(cleanLine, messageConsumer)
                 return true // don't print progress
             }
@@ -201,105 +292,6 @@ class CargoBuildEventsConverter(private val context: CargoBuildContext) : BuildO
         private data class Progress(val current: Long, val total: Long) {
             val fraction: Double = current.toDouble() / total
         }
-    }
-}
-
-class RustcBuildEventsConverter(private val context: CargoBuildContext) : BuildOutputParser {
-    private val messageEvents: MutableSet<MessageEvent> = hashSetOf()
-    private val messageBuffer: StringBuilder = StringBuilder()
-
-    override fun parse(
-        line: String,
-        reader: BuildOutputInstantReader,
-        messageConsumer: Consumer<in BuildEvent>
-    ): Boolean {
-        messageBuffer.append(line)
-        val text = messageBuffer.dropWhile { it != '{' }.toString()
-        val jsonObject = tryParseJsonObject(text)
-        if (jsonObject != null) {
-            messageBuffer.clear()
-        } else {
-            return false
-        }
-        return tryHandleRustcMessage(jsonObject, messageConsumer) || tryHandleRustcArtifact(jsonObject)
-    }
-
-    private fun tryHandleRustcMessage(jsonObject: JsonObject, messageConsumer: Consumer<in BuildEvent>): Boolean {
-        val topMessage = CargoTopMessage.fromJson(jsonObject) ?: return false
-        val rustcMessage = topMessage.message
-
-        val detailedMessage = rustcMessage.rendered
-        if (detailedMessage != null) {
-            messageConsumer.acceptText(context.buildId, detailedMessage.withNewLine())
-        }
-
-        val message = rustcMessage.message.trim().capitalize().trimEnd('.')
-        if (message.startsWith("Aborting due")) return true
-
-        val parentEventId = topMessage.package_id.substringBefore("(").trimEnd()
-
-        val kind = getMessageKind(rustcMessage.level)
-        if (kind == MessageEvent.Kind.SIMPLE) return true
-
-        val filePosition = getFilePosition(rustcMessage.spans)
-
-        val messageEvent = createMessageEvent(parentEventId, kind, message, detailedMessage, filePosition)
-        if (messageEvents.add(messageEvent)) {
-            messageConsumer.accept(messageEvent)
-            if (kind == MessageEvent.Kind.ERROR) {
-                context.errors += 1
-            } else {
-                context.warnings += 1
-            }
-        }
-
-        return true
-    }
-
-    private fun tryHandleRustcArtifact(jsonObject: JsonObject): Boolean {
-        val rustcArtifact = CargoMetadata.Artifact.fromJson(jsonObject) ?: return false
-
-        val isSuitableTarget = when (rustcArtifact.target.cleanKind) {
-            CargoMetadata.TargetKind.BIN -> true
-            CargoMetadata.TargetKind.EXAMPLE -> {
-                // TODO: support cases when crate types list contains not only binary
-                rustcArtifact.target.cleanCrateTypes.singleOrNull() == CargoMetadata.CrateType.BIN
-            }
-            CargoMetadata.TargetKind.TEST -> true
-            CargoMetadata.TargetKind.LIB -> rustcArtifact.profile.test
-            else -> false
-        }
-        if (!isSuitableTarget || context.isTestBuild && !rustcArtifact.profile.test) return true
-
-        val executable = rustcArtifact.executable
-        if (executable != null) {
-            context.binaries.add(Paths.get(executable))
-        } else {
-            // BACKCOMPAT: Cargo 0.34.0
-            rustcArtifact.filenames
-                .filter { it.endsWith(".dSYM") }
-                .mapTo(context.binaries) { Paths.get(it) }
-        }
-
-        return true
-    }
-
-    private fun getFilePosition(message: RustcMessage): FilePosition? {
-        val span = message.mainSpan ?: return null
-        val filePath = run {
-            var filePath = Paths.get(span.file_name)
-            if (!filePath.isAbsolute) {
-                filePath = context.workingDirectory.resolve(filePath)
-            }
-            filePath
-        }
-        return FilePosition(
-            filePath.toFile(),
-            span.line_start - 1,
-            span.column_start - 1,
-            span.line_end - 1,
-            span.column_end - 1
-        )
     }
 }
 

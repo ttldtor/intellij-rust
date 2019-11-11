@@ -42,7 +42,6 @@ import org.rust.openapiext.ProjectCache
 import org.rust.openapiext.checkReadAccessAllowed
 import org.rust.openapiext.checkReadAccessNotAllowed
 import org.rust.openapiext.saveAllDocumentsAsTheyAre
-import org.rust.openapiext.*
 import org.rust.stdext.JsonUtil.tryParseJsonObject
 import java.nio.file.Path
 import java.util.*
