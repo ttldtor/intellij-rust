@@ -17,13 +17,13 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.project.Project
 import com.intellij.pom.Navigatable
 import com.intellij.util.Consumer
-import org.rust.cargo.runconfig.buildtool.CargoBuildEventsConverter.Companion.RUSTC_MESSAGE_GROUP
 import org.rust.cargo.runconfig.buildtool.CargoBuildManager.mockBuildProgressListener
 import org.rust.cargo.runconfig.buildtool.CargoBuildManager.mockProgressIndicator
 import org.rust.cargo.runconfig.buildtool.CargoBuildManager.testBuildId
 import org.rust.cargo.runconfig.buildtool.CargoBuildResult
 import org.rust.cargo.runconfig.buildtool.MockBuildProgressListener
 import org.rust.cargo.runconfig.buildtool.MockProgressIndicator
+import org.rust.cargo.runconfig.buildtool.RUSTC_MESSAGE_GROUP
 import org.rustSlowTests.cargo.runconfig.RunConfigurationTestBase
 import java.util.function.Supplier
 

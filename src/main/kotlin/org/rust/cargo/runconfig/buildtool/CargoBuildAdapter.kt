@@ -93,13 +93,8 @@ class CargoBuildAdapter(
     }
 
     override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
-        messageBuffer.append(event.text)
+        messageBuffer.append(event.text.replace(PRIVATE_SEQ_RE, ""))
         if (!messageBuffer.endsWith("\n")) return
-
-        // If the line contains a JSON message (contains `{"reason"` substring), then it should end with `}\n`,
-        // otherwise the line contains only part of the message.
-        if (messageBuffer.contains("{\"reason\"") && !messageBuffer.endsWith("}\n")) return
-
         buildOutputReader.append(messageBuffer
             .replace(ERASE_LINES_RE, "\n")
             .replace(BUILD_PROGRESS_RE) { it.value.trimEnd(' ', '\r', '\n') + "\n" })
@@ -108,6 +103,7 @@ class CargoBuildAdapter(
 
     companion object {
         private val ERASE_LINES_RE: Regex = """${escapeToRegexp(CSI)}\d?K""".toRegex()
+        private val PRIVATE_SEQ_RE: Regex = """${escapeToRegexp(CSI)}\?\d+[hl]""".toRegex()
         private val BUILD_PROGRESS_RE: Regex = """($ANSI_SGR_RE)* *Building($ANSI_SGR_RE)* \[ *=*>? *] \d+/\d+: [\w\-(.)]+(, [\w\-(.)]+)*( *[\r\n])*""".toRegex()
 
         private fun createStopAction(processHandler: ProcessHandler): StopProcessAction =
