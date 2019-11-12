@@ -50,6 +50,8 @@ class CargoBuildContext(
     var errors: Int = 0
     var warnings: Int = 0
 
+    val startEventsIds: MutableSet<String> = hashSetOf()
+
     val binaries: MutableList<Path> = mutableListOf()
 
     fun waitAndStart(): Boolean {

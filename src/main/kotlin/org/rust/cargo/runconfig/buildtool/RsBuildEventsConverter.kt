@@ -40,6 +40,7 @@ class RustcBuildEventsConverter(private val context: CargoBuildContext) : BuildO
         if (!messageBuffer.contains("{\"reason\"") && !line.contains("{\"reason\"")) return false
         messageBuffer.append(line)
         val jsonObject = tryParseJsonObject(messageBuffer.dropWhile { it != '{' }.toString()) ?: return true
+        messageBuffer.clear()
         tryHandleRustcMessage(jsonObject, messageConsumer) || tryHandleRustcArtifact(jsonObject)
         return true
     }
@@ -65,7 +66,16 @@ class RustcBuildEventsConverter(private val context: CargoBuildContext) : BuildO
 
         val messageEvent = createMessageEvent(parentEventId, kind, message, detailedMessage, filePosition)
         if (messageEvents.add(messageEvent)) {
+            if (context.startEventsIds.add(parentEventId)) {
+                val startMessage = "Compiling $parentEventId"
+                val startEvent = StartEventImpl(parentEventId, context.buildId, System.currentTimeMillis(), startMessage)
+                val finishEvent = FinishEventImpl(parentEventId, context.buildId, System.currentTimeMillis(), startMessage, SuccessResultImpl(true))
+                messageConsumer.accept(startEvent)
+                messageConsumer.accept(finishEvent)
+            }
+
             messageConsumer.accept(messageEvent)
+
             if (kind == MessageEvent.Kind.ERROR) {
                 context.errors += 1
             } else {
@@ -183,6 +193,7 @@ class CargoBuildEventsConverter(private val context: CargoBuildContext) : BuildO
         val eventId = message.substringAfter(" ").replace(" v", " ")
         val startEvent = StartEventImpl(eventId, context.buildId, System.currentTimeMillis(), message)
         messageConsumer.accept(startEvent)
+        context.startEventsIds.add(eventId)
         if (isUpToDate) {
             val finishEvent = FinishEventImpl(
                 eventId,

@@ -12,7 +12,6 @@ import com.intellij.execution.process.KillableProcessHandler
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessTerminatedListener
 import com.intellij.execution.runners.ExecutionEnvironment
-import com.pty4j.PtyProcess
 import org.rust.cargo.project.model.CargoProject
 import org.rust.cargo.runconfig.buildtool.CargoPatch
 import org.rust.cargo.runconfig.command.CargoCommandConfiguration
@@ -77,7 +76,7 @@ abstract class CargoRunStateBase(
             if (emulateTerminal) {
                 PtyCommandLine(this)
                     .withInitialColumns(PtyCommandLine.MAX_COLUMNS)
-                    .withConsoleMode(true)
+                    .withConsoleMode(false)
             } else {
                 this
             }

@@ -94,7 +94,7 @@ class CargoBuildAdapter(
 
     override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
         messageBuffer.append(event.text)
-        if (!event.text.endsWith("\n")) return
+        if (!messageBuffer.endsWith("\n")) return
 
         // If the line contains a JSON message (contains `{"reason"` substring), then it should end with `}\n`,
         // otherwise the line contains only part of the message.
