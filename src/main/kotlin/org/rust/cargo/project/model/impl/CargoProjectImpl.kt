@@ -11,6 +11,7 @@ import com.intellij.execution.process.ProcessAdapter
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.State
@@ -202,29 +203,56 @@ open class CargoProjectsServiceImpl(
             .flatMap { ModuleRootManager.getInstance(it).contentRoots.asSequence() }
             .mapNotNull { it.findChild(RustToolchain.CARGO_TOML) }
 
-    fun updateFeature(cargoProject: CargoProjectImpl, cargoPackage: CargoWorkspace.Package, name: String, newState: Boolean) {
+    fun updateFeature(cargoProject: CargoProjectImpl, cargoPackage: CargoWorkspace.Package, name: String, newState: Boolean, isDocUnsaved: Boolean) {
         val packageToFeatures = cargoProject.userOverriddenFeatures.toMutableMap()
         val featureToState = packageToFeatures.getOrPut(cargoPackage.toString(), ::hashMapOf).toMutableMap()
         featureToState[name] = newState
-        val newProject = cargoProject.copy(userOverriddenFeatures = packageToFeatures)
-        doUpdateFeatures(cargoProject, newProject)
+        doUpdateFeatures(cargoProject, packageToFeatures, isDocUnsaved, cargoPackage.contentRoot.toString(), false, false)
     }
 
-    fun toggleAllFeatures(cargoProject: CargoProjectImpl, selectAll: Boolean) {
+    fun toggleAllFeatures(cargoProject: CargoProjectImpl, pkgContentRoot: String, selectAll: Boolean) {
         val userOverriddenFeatures = when (selectAll) {
-            true -> cargoProject.userOverriddenFeatures.mapValues { (_, features) ->
-                features.keys.associateWith { true }
+            true -> cargoProject.userOverriddenFeatures.mapValues { (contentRoot, features) ->
+                if (contentRoot == pkgContentRoot) {
+                    features.keys.associateWith { true }
+                } else {
+                    features
+                }
             }
             false -> emptyMap()
         }
-        val newProject = cargoProject.copy(userOverriddenFeatures = userOverriddenFeatures)
-        doUpdateFeatures(cargoProject, newProject)
+        doUpdateFeatures(cargoProject, userOverriddenFeatures, true, pkgContentRoot, syncAllFeatures = true, selectAll = selectAll)
+        projects
     }
 
-    private fun doUpdateFeatures(cargoProject: CargoProjectImpl, newProject: CargoProjectImpl) {
+    private fun doUpdateFeatures(
+        cargoProject: CargoProjectImpl,
+        userOverriddenFeatures: Map<String, Map<String, Boolean>>,
+        isDocUnsaved: Boolean,
+        pkgContentRoot: String,
+        syncAllFeatures: Boolean,
+        selectAll: Boolean
+    ) {
+        if (isDocUnsaved) {
+            runWriteAction {
+                saveAllDocuments()
+            }
+            refreshAllProjects()
+        }
+
         projects.updateSync { projects ->
+            val oldProject = projects.first { it.manifest == cargoProject.manifest }
+            val newProject = oldProject.copy(userOverriddenFeatures = userOverriddenFeatures)
             projects.filter { it.manifest != cargoProject.manifest } + newProject
         }.whenComplete { projects, _ ->
+            if (syncAllFeatures) {
+                val file = LocalFileSystem.getInstance().findFileByPath(pkgContentRoot)
+                if (file != null) {
+                    val pkg = runReadAction { findPackageForFile(file) }
+                    pkg?.syncAllFeatures(selectAll)
+                }
+            }
+
             ApplicationManager.getApplication().invokeAndWait {
                 runWriteAction {
                     directoryIndex.resetIndex()
