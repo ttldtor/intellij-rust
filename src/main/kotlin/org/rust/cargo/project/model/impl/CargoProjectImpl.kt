@@ -113,6 +113,7 @@ open class CargoProjectsServiceImpl(
 
 
     private val noProjectMarker = CargoProjectImpl(Paths.get(""), this)
+
     /**
      * [directoryIndex] allows to quickly map from a [VirtualFile] to
      * a containing [CargoProject].
@@ -203,40 +204,52 @@ open class CargoProjectsServiceImpl(
             .flatMap { ModuleRootManager.getInstance(it).contentRoots.asSequence() }
             .mapNotNull { it.findChild(RustToolchain.CARGO_TOML) }
 
-    fun updateFeature(cargoProject: CargoProjectImpl, cargoPackage: CargoWorkspace.Package, name: String, newState: Boolean, isDocUnsaved: Boolean) {
-        val packageToFeatures = cargoProject.userOverriddenFeatures.toMutableMap()
-        val featureToState = packageToFeatures.getOrPut(cargoPackage.toString(), ::hashMapOf).toMutableMap()
-        featureToState[name] = newState
-        doUpdateFeatures(cargoProject, packageToFeatures, isDocUnsaved, cargoPackage.contentRoot.toString(), false, false)
+    fun updateFeature(
+        cargoProject: CargoProjectImpl,
+        pkgContentRoot: String,
+        name: String,
+        newState: Boolean,
+        isDocUnsaved: Boolean
+    ) {
+        val userOverriddenFeatures = cargoProject.userOverriddenFeatures.mapValues { (contentRoot, features) ->
+            if (contentRoot == pkgContentRoot) {
+                features.mapValues { (feature, state) ->
+                    if (feature == name) newState else state
+                }
+            } else {
+                features
+            }
+        }
+
+        doUpdateFeatures(cargoProject, userOverriddenFeatures, pkgContentRoot, isDocUnsaved, newState, name)
     }
 
-    fun toggleAllFeatures(cargoProject: CargoProjectImpl, pkgContentRoot: String, selectAll: Boolean) {
-        val userOverriddenFeatures = when (selectAll) {
-            true -> cargoProject.userOverriddenFeatures.mapValues { (contentRoot, features) ->
-                if (contentRoot == pkgContentRoot) {
-                    features.keys.associateWith { true }
-                } else {
-                    features
-                }
+    fun updateAllFeatures(
+        cargoProject: CargoProjectImpl,
+        pkgContentRoot: String,
+        newState: Boolean
+    ) {
+        val userOverriddenFeatures = cargoProject.userOverriddenFeatures.mapValues { (contentRoot, features) ->
+            if (contentRoot == pkgContentRoot) {
+                features.keys.associateWith { newState }
+            } else {
+                features
             }
-            false -> emptyMap()
         }
-        doUpdateFeatures(cargoProject, userOverriddenFeatures, true, pkgContentRoot, syncAllFeatures = true, selectAll = selectAll)
-        projects
+
+        doUpdateFeatures(cargoProject, userOverriddenFeatures, pkgContentRoot, true, newState)
     }
 
     private fun doUpdateFeatures(
         cargoProject: CargoProjectImpl,
         userOverriddenFeatures: Map<String, Map<String, Boolean>>,
-        isDocUnsaved: Boolean,
         pkgContentRoot: String,
-        syncAllFeatures: Boolean,
-        selectAll: Boolean
+        isDocUnsaved: Boolean,
+        newState: Boolean,
+        featureName: String? = null // `String` when toggle specific feature, `null` when `Select all` or `Select none`
     ) {
         if (isDocUnsaved) {
-            runWriteAction {
-                saveAllDocuments()
-            }
+            runWriteAction { saveAllDocuments() }
             refreshAllProjects()
         }
 
@@ -245,11 +258,13 @@ open class CargoProjectsServiceImpl(
             val newProject = oldProject.copy(userOverriddenFeatures = userOverriddenFeatures)
             projects.filter { it.manifest != cargoProject.manifest } + newProject
         }.whenComplete { projects, _ ->
-            if (syncAllFeatures) {
-                val file = LocalFileSystem.getInstance().findFileByPath(pkgContentRoot)
-                if (file != null) {
-                    val pkg = runReadAction { findPackageForFile(file) }
-                    pkg?.syncAllFeatures(selectAll)
+            val file = LocalFileSystem.getInstance().findFileByPath(pkgContentRoot)
+            if (file != null) {
+                val pkg = runReadAction { findPackageForFile(file) }
+                if (featureName != null) {
+                    pkg?.syncFeature(featureName, newState)
+                } else {
+                    pkg?.syncAllFeatures(newState)
                 }
             }
 
@@ -260,7 +275,7 @@ open class CargoProjectsServiceImpl(
                     project.messageBus.syncPublisher(CargoProjectsService.CARGO_PROJECTS_TOPIC)
                         .cargoProjectsUpdated(projects)
                     DaemonCodeAnalyzer.getInstance(project).restart()
-//                    something like `refreshAllProjects()` in case of new dependency
+                    // something like `refreshAllProjects()` in case of new dependency
                 }
             }
         }
@@ -283,6 +298,7 @@ open class CargoProjectsServiceImpl(
                             .makeRootsChange(EmptyRunnable.getInstance(), false, true)
                         project.messageBus.syncPublisher(CargoProjectsService.CARGO_PROJECTS_TOPIC)
                             .cargoProjectsUpdated(projects)
+                        DaemonCodeAnalyzer.getInstance(project).restart()
                     }
                 }
 
@@ -297,7 +313,7 @@ open class CargoProjectsServiceImpl(
 
             val featuresText = StringBuilder()
             for ((pkg, features) in cargoProject.userOverriddenFeatures) {
-                featuresText.append("PACKAGE: $pkg")
+                featuresText.append("PACKAGE: $pkg\n")
                 for ((name, value) in features) {
                     featuresText.append("$name = $value\n")
                 }
@@ -324,7 +340,7 @@ open class CargoProjectsServiceImpl(
             for (line in featuresAttr.lines()) {
                 if (line.startsWith("PACKAGE: ")) {
                     currentPkg = line.substringAfter("PACKAGE: ")
-                } else {
+                } else if (line.contains(" = ")) {
                     val (name, value) = line.split(" = ")
                     pkgToFeatures.getOrPut(currentPkg, ::hashMapOf)[name] = value.toBoolean()
                 }
@@ -394,14 +410,13 @@ data class CargoProjectImpl(
 
     fun refresh(): CompletableFuture<CargoProjectImpl> {
         if (!workingDirectory.exists()) {
-            return CompletableFuture.completedFuture(copy(
-                stdlibStatus = UpdateStatus.UpdateFailed("Project directory does not exist"))
+            return CompletableFuture.completedFuture(
+                copy(stdlibStatus = UpdateStatus.UpdateFailed("Project directory does not exist"))
             )
         }
         return refreshRustcInfo()
             .thenCompose { it.refreshWorkspace() }
             .thenCompose { it.refreshStdlib() }
-//            .thenApply { it.featuresSetting = this.featuresSetting; it }
     }
 
     private fun refreshStdlib(): CompletableFuture<CargoProjectImpl> {
