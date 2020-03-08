@@ -19,7 +19,13 @@ import org.rust.lang.core.stubs.RsMetaItemStub
 
 val RsMetaItem.name: String? get() {
     val stub = greenStub
-    return if (stub != null) stub.name else identifier?.unescapedText
+    return if (stub != null) {
+        stub.name
+    } else {
+        val path = path ?: return null
+        if (path.hasColonColon) return null
+        path.referenceName
+    }
 }
 
 val RsMetaItem.value: String? get() = litExpr?.stringValue
@@ -35,7 +41,7 @@ abstract class RsMetaItemImplMixin : RsStubbedElementImpl<RsMetaItemStub>, RsMet
 
     constructor(stub: RsMetaItemStub, nodeType: IStubElementType<*, *>) : super(stub, nodeType)
 
-    override val referenceNameElement: PsiElement? get() = identifier
+    override val referenceNameElement: PsiElement? get() = null
 
     override val referenceName: String? get() = name
 
