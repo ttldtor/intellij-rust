@@ -26,13 +26,7 @@ import org.rust.lang.utils.evaluation.evaluate
 import org.rust.stdext.buildMap
 import org.rust.stdext.intersects
 
-class RsPathReferenceImpl(
-    element: RsPath
-) : RsReferenceBase<RsPath>(element),
-    RsPathReference {
-
-    override val RsPath.referenceAnchor: PsiElement get() = referenceNameElement
-
+class RsPathReferenceImpl(element: RsPath) : RsPathReferenceBase(element) {
     override fun isReferenceTo(target: PsiElement): Boolean {
         if (target is RsFieldDecl) return false
 

@@ -11,7 +11,6 @@ import com.intellij.psi.ResolveResult
 import org.rust.lang.core.psi.RsFunction
 import org.rust.lang.core.psi.RsMacro
 import org.rust.lang.core.psi.RsPath
-import org.rust.lang.core.psi.ext.RsElement
 import org.rust.lang.core.psi.ext.RsNamedElement
 import org.rust.lang.core.resolve.pickFirstResolveVariant
 import org.rust.lang.core.resolve.processMacroCallPathResolveVariants
@@ -36,17 +35,10 @@ import org.rust.stdext.ThreadLocalDelegate
  * 4. This reference introduces "batch mode" ([resolveInBatchMode]) in which another cache dependency is used.
  * |  See [ResolveCacheDependency.MACRO] for more info
  */
-class RsMacroPathReferenceImpl(
-    element: RsPath
-) : RsReferenceBase<RsPath>(element),
-    RsPathReference {
-    override val RsPath.referenceAnchor: PsiElement get() = referenceNameElement
+class RsMacroPathReferenceImpl(element: RsPath) : RsPathReferenceBase(element) {
 
     override fun isReferenceTo(element: PsiElement): Boolean =
         (element is RsMacro || element is RsFunction /* proc macro */) && super.isReferenceTo(element)
-
-    override fun advancedResolve(): BoundElement<RsElement>? =
-        resolve()?.let { BoundElement(it) }
 
     override fun multiResolve(incompleteCode: Boolean): Array<out ResolveResult> {
         return resolve()?.let { arrayOf(PsiElementResolveResult(it)) } ?: ResolveResult.EMPTY_ARRAY
