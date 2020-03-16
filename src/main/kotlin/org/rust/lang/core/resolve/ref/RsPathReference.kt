@@ -20,7 +20,3 @@ interface RsPathReference : RsReference {
 abstract class RsPathReferenceBase(element: RsPath): RsReferenceBase<RsPath>(element), RsPathReference {
     override val RsPath.referenceAnchor: PsiElement get() = referenceNameElement
 }
-
-class RsEmptyPathReference(element: RsPath) : RsPathReferenceBase(element) {
-    override fun multiResolve(): List<RsElement> = emptyList()
-}

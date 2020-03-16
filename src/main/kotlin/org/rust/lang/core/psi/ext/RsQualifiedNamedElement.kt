@@ -293,7 +293,7 @@ data class RsQualifiedName private constructor(
                         val path = kind.path
                         val primitiveType = TyPrimitive.fromPath(path)
                         if (primitiveType != null) return Item(primitiveType.name, PRIMITIVE)
-                        (path.reference.resolve() as? RsQualifiedNamedElement)?.toParentItem()
+                        (path.reference?.resolve() as? RsQualifiedNamedElement)?.toParentItem()
                     }
                 }
                 else -> null
